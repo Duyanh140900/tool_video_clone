@@ -1,0 +1,10 @@
+# OpenCV 5 works (uses FaceDetectorYN). OpenCV 4.x falls back to Haar.
+opencv-python-headless>=4.8.0
+numpy>=1.26.0
+Pillow>=10.0.0
+rembg>=2.0.50
+onnxruntime>=1.16.0
+streamlit>=1.32.0
+yt-dlp>=2024.1.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
