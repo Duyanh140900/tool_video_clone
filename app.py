@@ -1,6 +1,6 @@
 """
-Video Clone UI — dán link TikTok; mặt + nền lấy cố định từ thư mục assets
-(có thể chọn & cache path).
+Video Clone UI — dán link TikTok; mặt + nền từ thư mục assets (chọn & cache).
+Mọi path mặc định bám theo project root (clone máy khác vẫn chạy).
 
 Chạy:
   streamlit run app.py
@@ -17,21 +17,28 @@ from video_clone.config import (
     ASSETS_DIR,
     FINAL_OUTPUTS_DIR,
     LATEST_POINTER,
+    ROOT,
     SETTINGS_PATH,
     WORK_ROOT,
     assets_status,
     get_assets_dir,
+    get_finals_dir,
+    paths_status,
     reset_assets_dir,
+    reset_finals_dir,
     set_assets_dir,
+    set_finals_dir,
 )
 from video_clone.download import is_tiktok_url
 from video_clone.pipeline_run import new_run_id, prepare_from_tiktok_url, read_latest
 from video_clone.style import DEFAULT_STYLE_NAME
 
-ROOT = Path(__file__).resolve().parent
 
-
-def _pick_folder(initial: str | Path | None = None) -> str | None:
+def _pick_folder(
+    initial: str | Path | None = None,
+    *,
+    title: str = "Chọn thư mục",
+) -> str | None:
     """Native folder dialog (local desktop Streamlit only)."""
     try:
         import tkinter as tk
@@ -44,13 +51,18 @@ def _pick_folder(initial: str | Path | None = None) -> str | None:
     root.attributes("-topmost", True)
     try:
         init = str(initial) if initial else None
-        chosen = filedialog.askdirectory(
-            title="Chọn thư mục assets (face + background)",
-            initialdir=init,
-        )
+        chosen = filedialog.askdirectory(title=title, initialdir=init)
     finally:
         root.destroy()
     return chosen or None
+
+
+def _apply_pending(key: str, pending_key: str, default: str) -> None:
+    """Apply pending value before the widget with `key` is created."""
+    if pending_key in st.session_state:
+        st.session_state[key] = st.session_state.pop(pending_key)
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
 st.set_page_config(
@@ -91,6 +103,7 @@ st.markdown(
 )
 
 active_assets = get_assets_dir()
+active_finals = get_finals_dir()
 
 st.title("🎬 Video Clone")
 st.caption(
@@ -102,35 +115,55 @@ st.caption(
 )
 
 status = assets_status(active_assets)
-tab_new, tab_assets, tab_latest = st.tabs(
-    ["Tạo run (TikTok)", "Ảnh cố định", "Run gần nhất"]
+tab_new, tab_paths, tab_latest = st.tabs(
+    ["Tạo run (TikTok)", "Đường dẫn & ảnh", "Run gần nhất"]
 )
 
-with tab_assets:
-    st.subheader("Thư mục assets (face + background cố định)")
+with tab_paths:
+    st.subheader("Đường dẫn (theo project, có thể override)")
     st.caption(
-        "Chọn thư mục chứa face + background. Path được **cache** trong "
-        f"`{SETTINGS_PATH.name}` — lần sau mở UI sẽ dùng lại thư mục này."
+        "Mặc định **bám theo thư mục project** — clone máy khác vẫn chạy. "
+        f"Override được cache portable trong `{SETTINGS_PATH.name}` "
+        "(path trong project lưu dạng relative)."
     )
 
-    # Apply pending path BEFORE the text_input widget is created
-    # (Streamlit forbids mutating a widget key after the widget exists).
-    if "assets_dir_pending" in st.session_state:
-        st.session_state["assets_dir_input"] = st.session_state.pop("assets_dir_pending")
-    if "assets_dir_input" not in st.session_state:
-        st.session_state["assets_dir_input"] = str(active_assets)
+    ps = paths_status()
+    st.markdown("**Cố định theo project (không chọn)**")
+    st.code(
+        f"Project : {ps['project']}\n"
+        f"Work    : {ps['work']}\n"
+        f"Settings: {ps['settings']}",
+        language=None,
+    )
+
+    # --- Assets ---
+    st.markdown("---")
+    st.subheader("Assets (face + background)")
+    st.caption(
+        "Mặc định: `assets/` trong project. Có thể chọn thư mục khác; "
+        "path được nhớ cho lần sau."
+    )
+
+    _apply_pending(
+        "assets_dir_input",
+        "assets_dir_pending",
+        str(active_assets),
+    )
 
     path_col, browse_col = st.columns([4, 1])
     with path_col:
-        path_text = st.text_input(
-            "Đường dẫn thư mục",
+        assets_text = st.text_input(
+            "Đường dẫn assets",
             key="assets_dir_input",
             label_visibility="collapsed",
             placeholder=str(ASSETS_DIR),
         )
     with browse_col:
-        if st.button("📂 Chọn…", help="Mở hộp thoại chọn thư mục"):
-            chosen = _pick_folder(path_text or active_assets)
+        if st.button("📂 Chọn…", key="browse_assets", help="Chọn thư mục assets"):
+            chosen = _pick_folder(
+                assets_text or active_assets,
+                title="Chọn thư mục assets (face + background)",
+            )
             if chosen:
                 try:
                     saved = set_assets_dir(chosen)
@@ -141,33 +174,30 @@ with tab_assets:
             else:
                 st.info("Không chọn thư mục nào.")
 
-    btn_save, btn_reset = st.columns(2)
-    with btn_save:
-        if st.button("💾 Lưu & cache path", type="primary"):
+    a_save, a_reset = st.columns(2)
+    with a_save:
+        if st.button("💾 Lưu assets", type="primary", key="save_assets"):
             try:
-                saved = set_assets_dir(path_text.strip())
+                saved = set_assets_dir(assets_text.strip())
                 st.session_state["assets_dir_pending"] = str(saved)
                 st.rerun()
             except (NotADirectoryError, OSError) as exc:
                 st.error(str(exc))
-    with btn_reset:
-        if st.button("↺ Mặc định (project assets/)"):
+    with a_reset:
+        if st.button("↺ Mặc định assets/", key="reset_assets"):
             restored = reset_assets_dir()
             st.session_state["assets_dir_pending"] = str(restored)
             st.rerun()
 
-    # Re-read active path after cache updates (applied on next run via pending)
     active_assets = get_assets_dir()
     status = assets_status(active_assets)
-
-    st.code(str(active_assets), language=None)
     if status.get("is_default"):
         st.caption("Đang dùng thư mục mặc định của project.")
     else:
-        st.caption(f"Đang dùng path đã cache (mặc định project: `{ASSETS_DIR}`).")
+        st.caption(f"Override (mặc định: `{ASSETS_DIR}`).")
 
     st.markdown(
-        "Đặt file vào thư mục này (đổi file = đổi mặt/nền cho **mọi** run sau):"
+        "File trong thư mục (đổi file = đổi mặt/nền cho **mọi** run sau):"
     )
     st.markdown(
         "- `face.jpg` (hoặc `.png` / `.webp`)\n"
@@ -196,11 +226,71 @@ with tab_assets:
             unsafe_allow_html=True,
         )
 
+    # --- Finals ---
+    st.markdown("---")
+    st.subheader("Finals (video xuất bản)")
+    st.caption(
+        "Mặc định: `video_final_outputs/` trong project. "
+        "Video xong được copy thành `<run_id>.mp4` tại đây."
+    )
+
+    _apply_pending(
+        "finals_dir_input",
+        "finals_dir_pending",
+        str(active_finals),
+    )
+
+    f_col, f_browse = st.columns([4, 1])
+    with f_col:
+        finals_text = st.text_input(
+            "Đường dẫn finals",
+            key="finals_dir_input",
+            label_visibility="collapsed",
+            placeholder=str(FINAL_OUTPUTS_DIR),
+        )
+    with f_browse:
+        if st.button("📂 Chọn…", key="browse_finals", help="Chọn thư mục finals"):
+            chosen = _pick_folder(
+                finals_text or active_finals,
+                title="Chọn thư mục video final outputs",
+            )
+            if chosen:
+                try:
+                    saved = set_finals_dir(chosen)
+                    st.session_state["finals_dir_pending"] = str(saved)
+                    st.rerun()
+                except (NotADirectoryError, OSError) as exc:
+                    st.error(str(exc))
+            else:
+                st.info("Không chọn thư mục nào.")
+
+    f_save, f_reset = st.columns(2)
+    with f_save:
+        if st.button("💾 Lưu finals", type="primary", key="save_finals"):
+            try:
+                saved = set_finals_dir(finals_text.strip(), create=True)
+                st.session_state["finals_dir_pending"] = str(saved)
+                st.rerun()
+            except (NotADirectoryError, OSError) as exc:
+                st.error(str(exc))
+    with f_reset:
+        if st.button("↺ Mặc định video_final_outputs/", key="reset_finals"):
+            restored = reset_finals_dir()
+            st.session_state["finals_dir_pending"] = str(restored)
+            st.rerun()
+
+    active_finals = get_finals_dir()
+    if active_finals == FINAL_OUTPUTS_DIR.resolve():
+        st.caption("Đang dùng thư mục mặc định của project.")
+    else:
+        st.caption(f"Override (mặc định: `{FINAL_OUTPUTS_DIR}`).")
+    st.code(f"{active_finals}\\<run_id>.mp4", language=None)
+
 with tab_new:
     if not status["ok"]:
         st.markdown(
             f'<div class="warn">Cần face + background trong '
-            f"<code>{active_assets}</code> trước (xem tab Ảnh cố định).</div>",
+            f"<code>{active_assets}</code> trước (xem tab Đường dẫn & ảnh).</div>",
             unsafe_allow_html=True,
         )
 
@@ -321,7 +411,8 @@ with tab_latest:
 
 st.divider()
 st.caption(
-    f"Assets: `{active_assets}` · Project: `{ROOT}` · "
-    f"Finals: `{FINAL_OUTPUTS_DIR}\\<run_id>.mp4` · "
-    f"Cache: `{SETTINGS_PATH}`"
+    f"Project: `{ROOT}` · "
+    f"Assets: `{active_assets}` · "
+    f"Work: `{WORK_ROOT}` · "
+    f"Finals: `{active_finals}\\<run_id>.mp4`"
 )

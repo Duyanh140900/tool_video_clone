@@ -1,4 +1,13 @@
-"""Fixed paths and defaults for Video Clone."""
+"""Project-relative paths and optional user overrides for Video Clone.
+
+All defaults are relative to the project root (directory containing app.py).
+Cloning the repo onto another machine keeps working without hardcoded drives.
+
+Optional overrides (assets_dir, finals_dir) are stored in work/settings.json:
+- Paths under the project are saved relative to ROOT (portable).
+- Paths outside the project are saved absolute (machine-specific).
+- Missing/invalid cached paths fall back to project defaults.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +15,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Project root: .../video-clone-mvp
+# Project root: .../video-clone-mvp  (parent of video_clone package)
 ROOT = Path(__file__).resolve().parent.parent
 
-# Default assets — put face.jpg + background.jpg here (not uploaded per run).
-# User may override via UI; path is cached in work/settings.json.
+# Defaults — always under ROOT (portable across machines).
 ASSETS_DIR = ROOT / "assets"
 FACE_FILENAME = "face.jpg"
 BG_FILENAME = "background.jpg"
@@ -35,16 +43,13 @@ DOWNLOADS_ROOT = WORK_ROOT / "downloads"
 LATEST_POINTER = WORK_ROOT / "LATEST.json"
 SETTINGS_PATH = WORK_ROOT / "settings.json"
 
-# All finished videos land here, named by run id: <run_id>.mp4
+# Default finals folder (override via get/set_finals_dir).
 FINAL_OUTPUTS_DIR = ROOT / "video_final_outputs"
 
 
-def final_output_path(run_id: str) -> Path:
-    """Canonical published path: video_final_outputs/<run_id>.mp4"""
-    safe = "".join(
-        ch if (ch.isalnum() or ch in "-_") else "_" for ch in (run_id or "run").strip()
-    ).strip("._") or "run"
-    return FINAL_OUTPUTS_DIR / f"{safe}.mp4"
+# ---------------------------------------------------------------------------
+# Settings I/O + portable path encoding
+# ---------------------------------------------------------------------------
 
 
 def load_settings() -> dict[str, Any]:
@@ -65,39 +70,148 @@ def save_settings(settings: dict[str, Any]) -> None:
     )
 
 
-def get_assets_dir() -> Path:
+def path_to_setting(path: str | Path) -> str:
     """
-    Active assets folder: cached path from settings if it still exists,
-    otherwise project default `assets/`.
+    Encode a path for settings.json.
+    Prefer project-relative (portable); keep absolute only when outside ROOT.
     """
-    cached = load_settings().get("assets_dir")
-    if cached:
-        p = Path(str(cached)).expanduser()
+    p = Path(path).expanduser().resolve()
+    root = ROOT.resolve()
+    try:
+        rel = p.relative_to(root)
+        return rel.as_posix()
+    except ValueError:
+        return str(p)
+
+
+def path_from_setting(value: str | Path) -> Path:
+    """Decode a settings path (relative → under ROOT, absolute → as-is)."""
+    p = Path(str(value)).expanduser()
+    if not p.is_absolute():
+        p = ROOT / p
+    return p.resolve()
+
+
+def _cached_dir(key: str, default: Path, *, must_exist: bool = True) -> Path:
+    """Return cached directory if valid, else default.resolve()."""
+    raw = load_settings().get(key)
+    if raw:
         try:
-            if p.is_dir():
-                return p.resolve()
+            p = path_from_setting(str(raw))
+            if (not must_exist) or p.is_dir():
+                return p
         except OSError:
             pass
-    return ASSETS_DIR.resolve()
+    return default.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Assets dir (face + background)
+# ---------------------------------------------------------------------------
+
+
+def get_assets_dir() -> Path:
+    """Active assets folder: cached override if valid, else project `assets/`."""
+    return _cached_dir("assets_dir", ASSETS_DIR, must_exist=True)
 
 
 def set_assets_dir(path: str | Path) -> Path:
-    """Validate, cache, and return the resolved assets directory."""
-    p = Path(path).expanduser().resolve()
+    """Validate, cache (portable form), and return the resolved assets directory."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = (ROOT / p).resolve()
+    else:
+        p = p.resolve()
     if not p.is_dir():
         raise NotADirectoryError(f"Assets folder does not exist: {p}")
     settings = load_settings()
-    settings["assets_dir"] = str(p)
+    settings["assets_dir"] = path_to_setting(p)
     save_settings(settings)
     return p
 
 
 def reset_assets_dir() -> Path:
-    """Clear cached override; fall back to project default `assets/`."""
+    """Clear cached assets override; fall back to project `assets/`."""
     settings = load_settings()
     settings.pop("assets_dir", None)
     save_settings(settings)
     return ASSETS_DIR.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Finals dir (published videos)
+# ---------------------------------------------------------------------------
+
+
+def get_finals_dir() -> Path:
+    """
+    Active finals folder: cached override if valid, else project
+    `video_final_outputs/`. Creates the default folder on demand when used
+    by final_output_path / publish — not here unless override missing.
+    """
+    return _cached_dir("finals_dir", FINAL_OUTPUTS_DIR, must_exist=True)
+
+
+def set_finals_dir(path: str | Path, *, create: bool = True) -> Path:
+    """Cache finals directory (create if needed). Stored portable when under ROOT."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = (ROOT / p).resolve()
+    else:
+        p = p.resolve()
+    if create:
+        p.mkdir(parents=True, exist_ok=True)
+    if not p.is_dir():
+        raise NotADirectoryError(f"Finals folder does not exist: {p}")
+    settings = load_settings()
+    settings["finals_dir"] = path_to_setting(p)
+    save_settings(settings)
+    return p
+
+
+def reset_finals_dir() -> Path:
+    """Clear cached finals override; fall back to project `video_final_outputs/`."""
+    settings = load_settings()
+    settings.pop("finals_dir", None)
+    save_settings(settings)
+    return FINAL_OUTPUTS_DIR.resolve()
+
+
+def final_output_path(run_id: str) -> Path:
+    """Canonical published path: <finals_dir>/<run_id>.mp4"""
+    safe = "".join(
+        ch if (ch.isalnum() or ch in "-_") else "_" for ch in (run_id or "run").strip()
+    ).strip("._") or "run"
+    out_dir = get_finals_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"{safe}.mp4"
+
+
+def paths_status() -> dict[str, Any]:
+    """Snapshot of all key paths for UI / CLI (resolved absolute for display)."""
+    assets = get_assets_dir()
+    finals = get_finals_dir()
+    work = WORK_ROOT.resolve()
+    root = ROOT.resolve()
+    return {
+        "project": str(root),
+        "work": str(work),
+        "settings": str(SETTINGS_PATH.resolve()),
+        "assets_dir": str(assets),
+        "assets_is_default": assets == ASSETS_DIR.resolve(),
+        "finals_dir": str(finals),
+        "finals_is_default": finals == FINAL_OUTPUTS_DIR.resolve(),
+        "defaults": {
+            "assets_dir": str(ASSETS_DIR.resolve()),
+            "finals_dir": str(FINAL_OUTPUTS_DIR.resolve()),
+            "work": str(work),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Face / background resolution
+# ---------------------------------------------------------------------------
 
 
 def resolve_face(assets_dir: Path | None = None) -> Path:

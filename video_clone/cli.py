@@ -13,10 +13,16 @@ from .assemble import (
     probe_duration,
     publish_final_output,
 )
-from .config import FINAL_OUTPUTS_DIR
 from .chain import concat_videos, extract_last_frame, plan_shot_durations
 from .compose import compose_hero
-from .config import ASSETS_DIR, assets_status, get_assets_dir, resolve_bg, resolve_face
+from .config import (
+    ASSETS_DIR,
+    assets_status,
+    get_assets_dir,
+    get_finals_dir,
+    resolve_bg,
+    resolve_face,
+)
 from .download import download_tiktok_video, is_tiktok_url
 from .extract import extract_assets
 from .pipeline_run import prepare_from_tiktok_url, prepare_run, read_latest
@@ -113,7 +119,7 @@ def _cmd_assemble(args: argparse.Namespace) -> int:
     )
     print(f"work copy: {out_path.resolve() if out_path.exists() else out_path}")
     if not args.no_publish and rid:
-        print(f"named as : {FINAL_OUTPUTS_DIR / (rid + '.mp4')}")
+        print(f"named as : {get_finals_dir() / (rid + '.mp4')}")
     return 0
 
 

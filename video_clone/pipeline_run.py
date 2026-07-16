@@ -13,12 +13,12 @@ from .chain import concat_videos, plan_shot_durations
 from .compose import compose_hero
 from .config import (
     DOWNLOADS_ROOT,
-    FINAL_OUTPUTS_DIR,
     INBOX_ROOT,
     LATEST_POINTER,
     WORK_ROOT,
     final_output_path,
     get_assets_dir,
+    get_finals_dir,
     resolve_bg,
     resolve_face,
 )
@@ -222,7 +222,7 @@ def finish_run(
         "chain": str(chain),
         "final": str(final_in_run),
         "published": str(final_path),
-        "final_outputs_dir": str(FINAL_OUTPUTS_DIR),
+        "final_outputs_dir": str(get_finals_dir()),
         "run_id": rid,
         "duration": probe_duration(final_in_run),
     }

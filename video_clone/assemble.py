@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .config import FINAL_OUTPUTS_DIR, WORK_ROOT, final_output_path
+from .config import WORK_ROOT, final_output_path, get_finals_dir
 
 
 def publish_final_output(
@@ -271,7 +271,7 @@ def mux_audio(
         rid = run_id or infer_run_id_from_paths(out_path, video, audio)
         try:
             publish_final_output(out_path, run_id=rid)
-            print(f"folder   : {FINAL_OUTPUTS_DIR}")
+            print(f"folder   : {get_finals_dir()}")
         except Exception as exc:  # noqa: BLE001
             print(f"publish warning: {exc}")
 
