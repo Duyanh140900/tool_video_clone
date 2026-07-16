@@ -16,7 +16,7 @@ from .assemble import (
 from .config import FINAL_OUTPUTS_DIR
 from .chain import concat_videos, extract_last_frame, plan_shot_durations
 from .compose import compose_hero
-from .config import ASSETS_DIR, assets_status, resolve_bg, resolve_face
+from .config import ASSETS_DIR, assets_status, get_assets_dir, resolve_bg, resolve_face
 from .download import download_tiktok_video, is_tiktok_url
 from .extract import extract_assets
 from .pipeline_run import prepare_from_tiktok_url, prepare_run, read_latest
@@ -64,11 +64,13 @@ def _cmd_compose(args: argparse.Namespace) -> int:
 def _cmd_assets(args: argparse.Namespace) -> int:
     st = assets_status()
     print(f"assets_dir: {st['assets_dir']}")
+    print(f"default   : {ASSETS_DIR.resolve()}")
+    print(f"is_default: {st.get('is_default', True)}")
     print(f"face      : {st['face'] or 'MISSING'}")
     print(f"bg        : {st['bg'] or 'MISSING'}")
     print(f"ok        : {st['ok']}")
     if not st["ok"]:
-        print(f"Put face.jpg + background.jpg into {ASSETS_DIR}")
+        print(f"Put face.jpg + background.jpg into {get_assets_dir()}")
         return 1
     return 0
 

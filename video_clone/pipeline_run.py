@@ -12,14 +12,13 @@ from .assemble import mux_audio, probe_duration
 from .chain import concat_videos, plan_shot_durations
 from .compose import compose_hero
 from .config import (
-    ASSETS_DIR,
     DOWNLOADS_ROOT,
     FINAL_OUTPUTS_DIR,
     INBOX_ROOT,
     LATEST_POINTER,
     WORK_ROOT,
-    assets_status,
     final_output_path,
+    get_assets_dir,
     resolve_bg,
     resolve_face,
 )
@@ -57,6 +56,7 @@ def prepare_run(
     """
     face = Path(face) if face else resolve_face()
     bg = Path(bg) if bg else resolve_bg()
+    used_assets_dir = face.parent.resolve()
 
     rid = run_id or new_run_id()
     out = (out_dir or (WORK_ROOT / rid)).resolve()
@@ -107,7 +107,7 @@ def prepare_run(
         "hero_refined": str(out / "hero_refined.jpg"),
         "face": str(face),
         "bg": str(bg),
-        "assets_dir": str(ASSETS_DIR),
+        "assets_dir": str(used_assets_dir),
         "prompts_md": str(prompt_paths["md"]),
         "prompts_json": str(prompt_paths["json"]),
         "shots_dir": str(shots_dir),
@@ -164,8 +164,9 @@ def prepare_from_tiktok_url(
     if not is_tiktok_url(url):
         raise ValueError(f"Not a TikTok URL: {url}")
 
-    face = resolve_face(assets_dir)
-    bg = resolve_bg(assets_dir)
+    assets = Path(assets_dir).resolve() if assets_dir is not None else get_assets_dir()
+    face = resolve_face(assets)
+    bg = resolve_bg(assets)
 
     rid = run_id or new_run_id()
     dl_dir = DOWNLOADS_ROOT / rid

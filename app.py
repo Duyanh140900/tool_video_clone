@@ -1,5 +1,6 @@
 """
-Video Clone UI — dán link TikTok; mặt + nền lấy cố định từ assets/.
+Video Clone UI — dán link TikTok; mặt + nền lấy cố định từ thư mục assets
+(có thể chọn & cache path).
 
 Chạy:
   streamlit run app.py
@@ -16,14 +17,41 @@ from video_clone.config import (
     ASSETS_DIR,
     FINAL_OUTPUTS_DIR,
     LATEST_POINTER,
+    SETTINGS_PATH,
     WORK_ROOT,
     assets_status,
+    get_assets_dir,
+    reset_assets_dir,
+    set_assets_dir,
 )
 from video_clone.download import is_tiktok_url
 from video_clone.pipeline_run import new_run_id, prepare_from_tiktok_url, read_latest
 from video_clone.style import DEFAULT_STYLE_NAME
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _pick_folder(initial: str | Path | None = None) -> str | None:
+    """Native folder dialog (local desktop Streamlit only)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:  # noqa: BLE001
+        return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        init = str(initial) if initial else None
+        chosen = filedialog.askdirectory(
+            title="Chọn thư mục assets (face + background)",
+            initialdir=init,
+        )
+    finally:
+        root.destroy()
+    return chosen or None
+
 
 st.set_page_config(
     page_title="Video Clone",
@@ -62,23 +90,82 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+active_assets = get_assets_dir()
+
 st.title("🎬 Video Clone")
 st.caption(
     f"Dán **link TikTok** → tool tự tải video qua **SnapTik** "
     f"(fallback TikWM / yt-dlp). "
-    f"Ảnh mặt + nền **cố định** trong `assets/`. "
+    f"Ảnh mặt + nền **cố định** từ thư mục assets (có thể chọn & nhớ path). "
     f"Style: **{DEFAULT_STYLE_NAME}**. "
     f"Xong thì nhắn Grok: *làm tiếp run …*"
 )
 
-status = assets_status()
+status = assets_status(active_assets)
 tab_new, tab_assets, tab_latest = st.tabs(
     ["Tạo run (TikTok)", "Ảnh cố định", "Run gần nhất"]
 )
 
 with tab_assets:
     st.subheader("Thư mục assets (face + background cố định)")
-    st.code(str(ASSETS_DIR), language=None)
+    st.caption(
+        "Chọn thư mục chứa face + background. Path được **cache** trong "
+        f"`{SETTINGS_PATH.name}` — lần sau mở UI sẽ dùng lại thư mục này."
+    )
+
+    # Apply pending path BEFORE the text_input widget is created
+    # (Streamlit forbids mutating a widget key after the widget exists).
+    if "assets_dir_pending" in st.session_state:
+        st.session_state["assets_dir_input"] = st.session_state.pop("assets_dir_pending")
+    if "assets_dir_input" not in st.session_state:
+        st.session_state["assets_dir_input"] = str(active_assets)
+
+    path_col, browse_col = st.columns([4, 1])
+    with path_col:
+        path_text = st.text_input(
+            "Đường dẫn thư mục",
+            key="assets_dir_input",
+            label_visibility="collapsed",
+            placeholder=str(ASSETS_DIR),
+        )
+    with browse_col:
+        if st.button("📂 Chọn…", help="Mở hộp thoại chọn thư mục"):
+            chosen = _pick_folder(path_text or active_assets)
+            if chosen:
+                try:
+                    saved = set_assets_dir(chosen)
+                    st.session_state["assets_dir_pending"] = str(saved)
+                    st.rerun()
+                except (NotADirectoryError, OSError) as exc:
+                    st.error(str(exc))
+            else:
+                st.info("Không chọn thư mục nào.")
+
+    btn_save, btn_reset = st.columns(2)
+    with btn_save:
+        if st.button("💾 Lưu & cache path", type="primary"):
+            try:
+                saved = set_assets_dir(path_text.strip())
+                st.session_state["assets_dir_pending"] = str(saved)
+                st.rerun()
+            except (NotADirectoryError, OSError) as exc:
+                st.error(str(exc))
+    with btn_reset:
+        if st.button("↺ Mặc định (project assets/)"):
+            restored = reset_assets_dir()
+            st.session_state["assets_dir_pending"] = str(restored)
+            st.rerun()
+
+    # Re-read active path after cache updates (applied on next run via pending)
+    active_assets = get_assets_dir()
+    status = assets_status(active_assets)
+
+    st.code(str(active_assets), language=None)
+    if status.get("is_default"):
+        st.caption("Đang dùng thư mục mặc định của project.")
+    else:
+        st.caption(f"Đang dùng path đã cache (mặc định project: `{ASSETS_DIR}`).")
+
     st.markdown(
         "Đặt file vào thư mục này (đổi file = đổi mặt/nền cho **mọi** run sau):"
     )
@@ -104,7 +191,7 @@ with tab_assets:
 
     if not status["ok"]:
         st.markdown(
-            f'<div class="warn">Thiếu ảnh trong <code>{ASSETS_DIR}</code>. '
+            f'<div class="warn">Thiếu ảnh trong <code>{active_assets}</code>. '
             f"Copy face + background vào đó rồi reload trang.</div>",
             unsafe_allow_html=True,
         )
@@ -113,7 +200,7 @@ with tab_new:
     if not status["ok"]:
         st.markdown(
             f'<div class="warn">Cần face + background trong '
-            f"<code>{ASSETS_DIR}</code> trước (xem tab Ảnh cố định).</div>",
+            f"<code>{active_assets}</code> trước (xem tab Ảnh cố định).</div>",
             unsafe_allow_html=True,
         )
 
@@ -167,6 +254,7 @@ with tab_new:
                     at=at_val,
                     skip_face=skip_face,
                     skip_bg=skip_bg,
+                    assets_dir=active_assets,
                 )
                 st.session_state["last_result"] = result
             except Exception as exc:  # noqa: BLE001
@@ -179,6 +267,7 @@ with tab_new:
                 f'<div class="ok"><b>Run:</b> {result["run_id"]}<br/>'
                 f'<b>Source:</b> {result.get("source_url") or "—"}<br/>'
                 f'<b>Thư mục:</b> <code>{result["out_dir"]}</code><br/>'
+                f'<b>Assets:</b> <code>{result.get("assets_dir") or active_assets}</code><br/>'
                 f'<b>Style:</b> {result["style_name"]}<br/>'
                 f'<b>Audio:</b> {result["audio_seconds"]:.1f}s · '
                 f'shots {result["shot_durations"]}</div>',
@@ -232,6 +321,7 @@ with tab_latest:
 
 st.divider()
 st.caption(
-    f"Assets: `{ASSETS_DIR}` · Project: `{ROOT}` · "
-    f"Finals: `{FINAL_OUTPUTS_DIR}\\<run_id>.mp4`"
+    f"Assets: `{active_assets}` · Project: `{ROOT}` · "
+    f"Finals: `{FINAL_OUTPUTS_DIR}\\<run_id>.mp4` · "
+    f"Cache: `{SETTINGS_PATH}`"
 )
